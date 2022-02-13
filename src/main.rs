@@ -97,7 +97,7 @@ async fn main()  -> Result<(), Box<dyn std::error::Error>> {
         let current_url = sites.urls.pop();
         match current_url {
             Some(actual_url) => {
-                //println!("Parsing: {}", actual_url);
+                println!("Parsing: {}", actual_url);
                 let response = reqwest::get(&actual_url).await?;
                 let is_success = response.status().is_success();
                 let status_code = response.status().as_u16();
@@ -115,10 +115,8 @@ async fn main()  -> Result<(), Box<dyn std::error::Error>> {
                     match Document::try_from(url.body.as_str()) {
                         Ok(document) => {
                             document.find(Name("a"))
-                                //.filter(|n| !vec!["#", ""].iter().any(|&nv| nv == n.attr("href")))
                                 .filter_map(|n| n.attr("href"))
                                 .for_each(|x| {
-                                    // We need to add checks here, to prevent parsing errors because of invalid urls
                                     let normalized_url = normalize_url(x, &domain);
                                     if is_valid_url(&normalized_url, &domain) && (!sites_processed.has(&normalized_url) && !sites.has(&normalized_url)) {
                                         sites.add(normalized_url);
@@ -129,27 +127,6 @@ async fn main()  -> Result<(), Box<dyn std::error::Error>> {
                             println!("Unable to parse node...")
                         }
                     }
-
-                        /*.unwrap()
-                        .find(Name("a"))
-                        .filter_map(|n| n.attr("href"))
-                        .for_each(|x| println!("{}", x));*/
-
-
-                    //println!("{}", body_text);
-                    //let links_found = Hyperlink::new(body_text.as_str(), false);
-                    //let links_found = html_text2dest_link(&body_text.as_str());
-                    //for link in links_found {
-                    //    println!("{:?}",link);
-                    //}
-
-                    //println!("{:?}", links_found);
-
-
-                    //let all_links = links_found.into_iter().map(|&link| =>  ).collect();
-                    //for link in html_text2dest_link(links_found) {
-
-                    //}
                 }
             },
             None => println!("{}", "Something went wrong, execution is continuing...")
@@ -175,9 +152,4 @@ fn normalize_url(url: &str, domain: &String) -> String {
         },
         None => url.to_string()
     }
-    //if url.chars().nth(0).unwrap().to_string() == "/" {
-        //return domain.to_string() + &url[1..url.len()]
-    //}
-
-
 }
