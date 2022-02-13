@@ -91,8 +91,21 @@ async fn main()  -> Result<(), Box<dyn std::error::Error>> {
                     match Document::try_from(body_text.as_str()) {
                         Ok(document) => {
                             document.find(Name("a"))
+                                .filter(|n| {
+                                    // Remove empty or self referenced node
+                                    if vec!["#", ""].iter().any(|&nv| nv == n.attr("href").unwrap()) {
+                                        return false
+                                    }
+                                    true
+                                })
                                 .filter_map(|n| n.attr("href"))
-                                .for_each(|x| println!("{}", x))
+                                //.for_each(|x| println!("{}", x))
+                                .for_each(|x| {
+
+                                    // We need to add checks here, to prevent parsing errors because of invalid urls
+
+                                    sites.add(Url::from(x.to_string()));
+                                })
                         }
                         Err(_) => {
                             println!("Unable to parse node...")
