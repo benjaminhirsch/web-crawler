@@ -32,6 +32,7 @@ impl Url {
 }
 
 #[derive(Debug)]
+#[allow(dead_code)]
 struct ParsedUrl {
     url: String,
     status_code: u16,
@@ -50,7 +51,7 @@ impl UrlsToParse {
         self
     }
 
-    pub fn has(&mut self, url: &String) -> bool {
+    pub fn has(&mut self, url: &str) -> bool {
         self.urls.iter().any(|u| u == url)
     }
 }
@@ -67,8 +68,8 @@ impl ParsedUrls {
         self
     }
 
-    pub fn has(&mut self, url: &String) -> bool {
-        self.urls.iter().any(|u| u.url == url.to_string())
+    pub fn has(&mut self, url: &str) -> bool {
+        self.urls.iter().any(|u| u.url == *url)
     }
 }
 
@@ -93,7 +94,7 @@ async fn main()  -> Result<(), Box<dyn std::error::Error>> {
     sites.add(args[1].to_string());
     let domain = args[1].clone();
 
-    while sites.urls.len() > 0 {
+    while !sites.urls.is_empty() {
         let current_url = sites.urls.pop();
         match current_url {
             Some(actual_url) => {
@@ -129,7 +130,7 @@ async fn main()  -> Result<(), Box<dyn std::error::Error>> {
                     }
                 }
             },
-            None => println!("{}", "Something went wrong, execution is continuing...")
+            None => println!("Something went wrong, execution is continuing...")
         }
     }
 
@@ -137,14 +138,14 @@ async fn main()  -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-fn is_valid_url(url: &str, domain: &String) -> bool {
-    url.starts_with(domain) && !url.starts_with("#") && !url.starts_with("tel")
+fn is_valid_url(url: &str, domain: &str) -> bool {
+    url.starts_with(domain) && !url.starts_with('#') && !url.starts_with("tel")
 }
 
-fn normalize_url(url: &str, domain: &String) -> String {
-    match url.chars().nth(0) {
+fn normalize_url(url: &str, domain: &str) -> String {
+    match url.chars().next() {
         Some(string) => {
-            return if string.to_string() == "/" {
+            if string.to_string() == "/" {
                 domain.to_string() + &url[1..url.len()]
             } else {
                 url.to_string()
