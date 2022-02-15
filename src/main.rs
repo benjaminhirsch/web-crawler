@@ -87,8 +87,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut sites = UrlsToParse::create();
     let mut sites_processed = ParsedUrls::create();
 
-    sites.add(args[1].to_string());
-    let domain = args[1].clone();
+    let mut domain = args[1].to_string();
+
+    // Add missing trailing slash at the end if necessary
+    if !domain.ends_with("/") {
+        domain += "/";
+    }
+
+    sites.add(domain.to_string());
 
     while !sites.urls.is_empty() {
         let current_url = sites.urls.pop();
