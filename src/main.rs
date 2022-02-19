@@ -1,14 +1,17 @@
 #[allow(unused, unused_imports, dead_code)]
 use cli_table::format::Justify;
 use cli_table::{print_stdout, Cell, Style, Table, TableStruct};
+use reqwest::Response;
 use select::document::Document;
 use select::predicate::Name;
 use std::env;
+use std::fmt::{Display, Formatter};
 use std::io::{stdout, Write};
 
 #[derive(Debug)]
 struct UrlsToParse {
     pub urls: Vec<String>,
+    pub domain: String,
 }
 
 #[derive(Debug)]
@@ -41,16 +44,37 @@ struct ParsedUrl {
 }
 
 impl UrlsToParse {
-    pub fn create() -> Self {
-        UrlsToParse { urls: vec![] }
+    pub fn create(domain: String) -> Self {
+        UrlsToParse {
+            urls: vec![],
+            domain,
+        }
     }
 
-    pub fn add(&mut self, url: String) -> &Self {
+    pub fn is_valid_url(&self, url: &str) -> bool {
+        url.starts_with(&self.domain.to_string())
+            && !url.starts_with('#')
+            && !url.starts_with("tel")
+    }
+
+    pub fn normalize_url(&self, url: &str) -> String {
+        match url.chars().next() {
+            Some(string) => {
+                if string.to_string() == "/" {
+                    self.domain.to_string() + &url[1..url.len()]
+                } else {
+                    url.to_string()
+                }
+            }
+            None => url.to_string(),
+        }
+    }
+
+    pub fn add(&mut self, url: String) {
         self.urls.push(url);
-        self
     }
 
-    pub fn has(&mut self, url: &str) -> bool {
+    pub fn has(&self, url: &str) -> bool {
         self.urls.iter().any(|u| u == url)
     }
 }
@@ -60,13 +84,19 @@ impl ParsedUrls {
         ParsedUrls { urls: vec![] }
     }
 
-    pub fn add(&mut self, url: ParsedUrl) -> &Self {
+    pub fn add(&mut self, url: ParsedUrl) -> &mut Self {
         self.urls.push(url);
         self
     }
 
-    pub fn has(&mut self, url: &str) -> bool {
+    pub fn has(&self, url: &str) -> bool {
         self.urls.iter().any(|u| u.url == *url)
+    }
+}
+
+impl Display for ParsedUrl {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.url)
     }
 }
 
@@ -84,57 +114,60 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<String> = env::args().collect();
     println!("Starting to parse: {}", args[1]);
 
-    let mut sites = UrlsToParse::create();
-    let mut sites_processed = ParsedUrls::create();
-
     let mut domain = args[1].to_string();
 
     // Add missing trailing slash at the end if necessary
-    if !domain.ends_with("/") {
+    if !domain.ends_with('/') {
         domain += "/";
     }
 
-    sites.add(domain.to_string());
+    let mut urls_to_parse = UrlsToParse::create(domain);
+    let mut parsed_urls = ParsedUrls::create();
 
-    while !sites.urls.is_empty() {
-        let current_url = sites.urls.pop();
+    urls_to_parse.add(urls_to_parse.normalize_url("/"));
+
+    while !urls_to_parse.urls.is_empty() {
+        let current_url = urls_to_parse.urls.pop();
         match current_url {
             Some(actual_url) => {
-                // Add switch (verbose)
-                //println!("Parsing: {}", actual_url);
                 let response = reqwest::get(&actual_url).await?;
-                let is_success = response.status().is_success();
                 let status_code = response.status().as_u16();
+
+                // Should be configurable - skipping files
+                if !is_site(&response) {
+                    continue;
+                }
+
                 let body_text = response.text().await?;
-
                 let url = &Url::create(actual_url, status_code, body_text);
-                sites_processed.add(ParsedUrl::from(url));
+                parsed_urls.add(ParsedUrl::from(url));
 
-                if !sites_processed.urls.is_empty() && !sites.urls.is_empty() {
+                if !parsed_urls.urls.is_empty() && !urls_to_parse.urls.is_empty() {
                     print!(
                         "\rProcessed {} sites, in queue {} ",
-                        sites_processed.urls.len(),
-                        sites.urls.len()
+                        parsed_urls.urls.len(),
+                        urls_to_parse.urls.len()
                     );
                     stdout().flush().unwrap();
                 }
 
-                if is_success {
-                    match Document::try_from(url.body.as_str()) {
-                        Ok(document) => document
-                            .find(Name("a"))
-                            .filter_map(|n| n.attr("href"))
-                            .for_each(|x| {
-                                let normalized_url = normalize_url(x, &domain);
-                                if is_valid_url(&normalized_url, &domain)
-                                    && (!sites_processed.has(&normalized_url)
-                                        && !sites.has(&normalized_url))
-                                {
-                                    sites.add(normalized_url);
-                                }
-                            }),
-                        Err(_) => {
-                            println!("Unable to parse node...")
+                let doc = Document::try_from(url.body.as_str());
+
+                if let Ok(document) = doc {
+                    let nodes = document.find(Name("a"));
+                    for node in nodes {
+                        if node.attr("href").is_some() {
+                            let url = node.attr("href").unwrap().to_string();
+                            let normalized_url = urls_to_parse.normalize_url(url.as_str());
+                            if urls_to_parse.is_valid_url(&normalized_url)
+                                && not_already_processed(
+                                    &normalized_url,
+                                    &parsed_urls,
+                                    &urls_to_parse,
+                                )
+                            {
+                                urls_to_parse.add(normalized_url.clone().to_string());
+                            }
                         }
                     }
                 }
@@ -145,29 +178,30 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     println!(
         "\n\nFinished check! Scanned {} sites.\n",
-        sites_processed.urls.len()
+        parsed_urls.urls.len()
     );
-    if let Some(t) = calculate_summary(&sites_processed) {
+    if let Some(t) = calculate_summary(&parsed_urls) {
         print_stdout(t)?;
     };
+
+    for x in parsed_urls.urls {
+        println!("{}", x);
+    }
 
     Ok(())
 }
 
-fn is_valid_url(url: &str, domain: &str) -> bool {
-    url.starts_with(domain) && !url.starts_with('#') && !url.starts_with("tel")
+fn not_already_processed(url: &str, parsed_urls: &ParsedUrls, urls_to_parse: &UrlsToParse) -> bool {
+    !parsed_urls.has(url) && !urls_to_parse.has(url)
 }
 
-fn normalize_url(url: &str, domain: &str) -> String {
-    match url.chars().next() {
-        Some(string) => {
-            if string.to_string() == "/" {
-                domain.to_string() + &url[1..url.len()]
-            } else {
-                url.to_string()
-            }
-        }
-        None => url.to_string(),
+fn is_site(response: &Response) -> bool {
+    match response.headers().get("content-type") {
+        Some(header) => match header.to_str() {
+            Ok(h) => h.contains("text/html"),
+            _ => false,
+        },
+        _ => false,
     }
 }
 
